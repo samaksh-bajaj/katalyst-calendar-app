@@ -17,15 +17,35 @@ const target = endpoint.startsWith("http") ? endpoint : absoluteUrl(endpoint);
 
 const MCP_HEADERS: Record<string, string> = {
   "content-type": "application/json",
-  // Composio can stream (SSE), so accept both
   accept: "application/json, text/event-stream",
   ...(process.env.COMPOSIO_API_KEY ? { authorization: `Bearer ${process.env.COMPOSIO_API_KEY}` } : {}),
 };
 
-// Keep logs enabled while debugging
-const DEBUG = true;
+const DEBUG = true; // leave on while integrating
 
-/* ---------- SSE-aware JSON-RPC client ---------- */
+/* ---------- Helpers to handle Composio's SSE payload shape ---------- */
+
+function unpackMcpPayload(result: any): any {
+  // Composio often returns: { content: [{ type:"text", text: "{...json...}" }] }
+  if (result && Array.isArray(result.content)) {
+    // pick last text block
+    const lastText = [...result.content]
+      .reverse()
+      .find((c: any) => typeof c?.text === "string")?.text;
+    if (lastText) {
+      try {
+        const parsed = JSON.parse(lastText);
+        // If that parsed object nests data (successfull/error/data/logs), return it
+        return parsed ?? result;
+      } catch {
+        // not JSON, fall through
+      }
+    }
+  }
+  return result;
+}
+
+/* ---------- SSE-aware JSON-RPC wrapper (safe, never throws) ---------- */
 
 type McpCall = { ok: true; result: any } | { ok: false; result: null };
 
@@ -41,7 +61,7 @@ async function mcp(method: string, params: any): Promise<McpCall> {
     const text = await res.text();
     if (DEBUG) console.error(`[MCP ${method}] raw response:\n${text.slice(0, 500)}`);
 
-    // SSE: extract data: lines
+    // SSE: "event: message\n data: {...}"
     if (text.startsWith("event:")) {
       const dataLines = text
         .split("\n")
@@ -96,26 +116,44 @@ async function mcpListTools(): Promise<McpTool[]> {
   return tools ?? [];
 }
 
-// UNWRAPPED result (important change)
+// UNWRAPPED result for tools/call
 async function mcpCallTool(name: string, args: Record<string, any>): Promise<any | null> {
   const r = await mcp("tools/call", { name, arguments: args });
-  return r.ok ? r.result : null;
+  return r.ok ? unpackMcpPayload(r.result) : null;
 }
 
-/* ---------- Tool pickers ---------- */
+/* ---------- Pick the correct tools (prefer exact names) ---------- */
 
 function pickEventsListTool(tools: McpTool[]) {
-  return tools.find((t) => {
-    const n = (t.name || "").toLowerCase();
-    return n.includes("events") && n.includes("list");
-  }) ?? null;
+  // Prefer exact / strong matches first
+  const exact = tools.find((t) => t.name.toUpperCase() === "GOOGLECALENDAR_EVENTS_LIST");
+  if (exact) return exact;
+  // Fallback heuristic
+  return (
+    tools.find((t) => {
+      const n = (t.name || "").toLowerCase();
+      return n.includes("events") && n.includes("list");
+    }) ?? null
+  );
 }
 
 function pickCalendarListTool(tools: McpTool[]) {
-  return tools.find((t) => {
+  // Prefer LIST_CALENDARS (not CALENDAR_LIST_INSERT)
+  const exact = tools.find((t) => t.name.toUpperCase() === "GOOGLECALENDAR_LIST_CALENDARS");
+  if (exact) return exact;
+  // Other sane list-calendars names
+  const alts = tools.find((t) => {
     const n = (t.name || "").toLowerCase();
-    return n.includes("calendar") && n.includes("list");
-  }) ?? null;
+    return n.includes("calendars") && n.includes("list");
+  });
+  if (alts) return alts;
+  // Last resort: anything with "calendar" + "list" but avoid "insert"/"update"
+  return (
+    tools.find((t) => {
+      const n = (t.name || "").toLowerCase();
+      return n.includes("calendar") && n.includes("list") && !n.includes("insert") && !n.includes("update");
+    }) ?? null
+  );
 }
 
 /* ---------- Normalization ---------- */
@@ -137,10 +175,9 @@ function normalize(raw: RawEvent, now = new Date()): Meeting | null {
   return {
     id: raw.id,
     title: raw.summary ?? "(No title)",
-    start,
-    end,
+    start, end,
     durationMins: toDurationMins(start, end),
-    attendees: (raw.attendees ?? []).map((a) => ({
+    attendees: (raw.attendees ?? []).map(a => ({
       email: a.email,
       displayName: a.displayName,
       response: a.responseStatus,
@@ -151,17 +188,17 @@ function normalize(raw: RawEvent, now = new Date()): Meeting | null {
 }
 
 function splitUpcomingPast(rawEvents: RawEvent[]) {
-  const mapped = rawEvents.map((e) => normalize(e)).filter(Boolean) as Meeting[];
+  const mapped = rawEvents.map(e => normalize(e)).filter(Boolean) as Meeting[];
   const now = Date.now();
-  const upcoming = mapped.filter((m) => +new Date(m.end) >= now).slice(0, 5);
+  const upcoming = mapped.filter(m => +new Date(m.end) >= now).slice(0, 5);
   const past = mapped
-    .filter((m) => +new Date(m.end) < now)
-    .sort((a, b) => +new Date(b.end) - +new Date(a.end))
-    .slice(0, 5);
+    .filter(m => +new Date(m.end) < now)
+    .sort((a,b)=>+new Date(b.end)-+new Date(a.end))
+    .slice(0,5);
   return { upcoming, past };
 }
 
-/* ---------- Public function ---------- */
+/* ---------- Public: fetch meetings via Composio ---------- */
 
 export async function fetchMeetingsViaMCP() {
   if (!process.env.NEXT_PUBLIC_MCP_URL) {
@@ -180,43 +217,54 @@ export async function fetchMeetingsViaMCP() {
     return { upcoming: [], past: [] };
   }
 
-  // 1) List calendars (if tool exists) -> collect IDs
+  // 1) List calendars (prefer tool, else 'primary')
   let calendarIds: string[] = ["primary"];
   if (calListTool) {
-    const calListResult: any = await mcpCallTool(calListTool.name, { maxResults: 50 });
-    console.error("[MCP] raw calendar list result:", JSON.stringify(calListResult).slice(0, 500));
-    const calendars = (calListResult?.items ?? calListResult?.calendars ?? calListResult ?? []) as any[];
-    const ids = Array.isArray(calendars)
-      ? calendars.map((c) => c?.id || c?.calendarId).filter((x) => typeof x === "string")
-      : [];
+    const calListPayload: any = await mcpCallTool(calListTool.name, { maxResults: 100 });
+    console.error("[MCP] raw calendar list payload:", JSON.stringify(calListPayload).slice(0, 600));
+
+    // Common shapes seen from Composio:
+    // { successfull, error, data: { items: [...] } }
+    // or { items: [...] } or just [...]
+    const calendars =
+      calListPayload?.data?.items ??
+      calListPayload?.items ??
+      (Array.isArray(calListPayload) ? calListPayload : []);
+
+    const ids =
+      Array.isArray(calendars)
+        ? calendars.map((c: any) => c?.id || c?.calendarId).filter((x: any) => typeof x === "string")
+        : [];
+
     if (ids.length) calendarIds = ids;
     console.error("[MCP] calendarIds:", calendarIds);
   }
 
-  // 2) List events for each calendar
+  // 2) List events per calendar (merge)
   const now = new Date();
   const timeMin = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const timeMax = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
   let allEvents: RawEvent[] = [];
-  for (const calId of calendarIds.slice(0, 5)) {
+  for (const calId of calendarIds.slice(0, 8)) {
     const args = {
       calendarId: calId,
       timeMin,
       timeMax,
       singleEvents: true,
       orderBy: "startTime",
-      maxResults: 50,
+      maxResults: 100,
     };
-    const result: any = await mcpCallTool(eventsTool.name, args);
-    console.error(`[MCP] raw events for ${calId}:`, JSON.stringify(result).slice(0, 500));
+    const eventsPayload: any = await mcpCallTool(eventsTool.name, args);
+    console.error(`[MCP] raw events payload for ${calId}:`, JSON.stringify(eventsPayload).slice(0, 600));
 
+    // Composio shapes we’ve seen:
+    // { successfull, error, data: { items: [...] } }
+    // or { items: [...] } or [...]
     const events: RawEvent[] =
-      (result?.items as RawEvent[]) ??
-      (result?.events as RawEvent[]) ??
-      (result?.content?.events as RawEvent[]) ??
-      (result?.content as RawEvent[]) ??
-      (Array.isArray(result) ? (result as RawEvent[]) : []) ??
+      eventsPayload?.data?.items ??
+      eventsPayload?.items ??
+      (Array.isArray(eventsPayload) ? (eventsPayload as RawEvent[]) : []) ??
       [];
 
     if (Array.isArray(events)) allEvents = allEvents.concat(events);
