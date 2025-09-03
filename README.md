@@ -20,4 +20,4 @@ This folder contains everything you need:
 - Data shaping: `src/lib/mcp.ts`, types in `src/types.ts`
 
 ## Next steps
-- Swap `/api/mcp` to a real MCP calendar server by editing `src/lib/mcp.ts` (use an env var and fetch the external URL).
+- Create an actual login page.
