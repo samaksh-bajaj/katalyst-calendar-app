@@ -17,15 +17,19 @@ const target = endpoint.startsWith("http") ? endpoint : absoluteUrl(endpoint);
 
 const MCP_HEADERS: Record<string, string> = {
   "content-type": "application/json",
+  // Composio can stream (SSE), so accept both
   accept: "application/json, text/event-stream",
   ...(process.env.COMPOSIO_API_KEY ? { authorization: `Bearer ${process.env.COMPOSIO_API_KEY}` } : {}),
 };
 
-const DEBUG = true; // always log for now
+// Keep logs enabled while debugging
+const DEBUG = true;
 
 /* ---------- SSE-aware JSON-RPC client ---------- */
 
-async function mcp(method: string, params: any) {
+type McpCall = { ok: true; result: any } | { ok: false; result: null };
+
+async function mcp(method: string, params: any): Promise<McpCall> {
   try {
     const res = await fetch(target, {
       method: "POST",
@@ -37,7 +41,7 @@ async function mcp(method: string, params: any) {
     const text = await res.text();
     if (DEBUG) console.error(`[MCP ${method}] raw response:\n${text.slice(0, 500)}`);
 
-    // If SSE: look for data: lines
+    // SSE: extract data: lines
     if (text.startsWith("event:")) {
       const dataLines = text
         .split("\n")
@@ -92,8 +96,10 @@ async function mcpListTools(): Promise<McpTool[]> {
   return tools ?? [];
 }
 
-async function mcpCallTool(name: string, args: Record<string, any>) {
-  return mcp("tools/call", { name, arguments: args });
+// UNWRAPPED result (important change)
+async function mcpCallTool(name: string, args: Record<string, any>): Promise<any | null> {
+  const r = await mcp("tools/call", { name, arguments: args });
+  return r.ok ? r.result : null;
 }
 
 /* ---------- Tool pickers ---------- */
@@ -102,14 +108,14 @@ function pickEventsListTool(tools: McpTool[]) {
   return tools.find((t) => {
     const n = (t.name || "").toLowerCase();
     return n.includes("events") && n.includes("list");
-  });
+  }) ?? null;
 }
 
 function pickCalendarListTool(tools: McpTool[]) {
   return tools.find((t) => {
     const n = (t.name || "").toLowerCase();
     return n.includes("calendar") && n.includes("list");
-  });
+  }) ?? null;
 }
 
 /* ---------- Normalization ---------- */
@@ -125,7 +131,7 @@ type RawEvent = {
 
 function normalize(raw: RawEvent, now = new Date()): Meeting | null {
   const start = raw.start?.dateTime ?? (raw.start?.date ? `${raw.start.date}T00:00:00Z` : null);
-  const end = raw.end?.dateTime ?? (raw.end?.date ? `${raw.end.date}T00:00:00Z` : null);
+  const end   = raw.end?.dateTime   ?? (raw.end?.date   ? `${raw.end.date}T00:00:00Z`   : null);
   if (!start || !end) return null;
   const isPast = new Date(end).getTime() < now.getTime();
   return {
@@ -174,26 +180,26 @@ export async function fetchMeetingsViaMCP() {
     return { upcoming: [], past: [] };
   }
 
-  // 1. Get calendars
+  // 1) List calendars (if tool exists) -> collect IDs
   let calendarIds: string[] = ["primary"];
   if (calListTool) {
-    const calListResult = await mcpCallTool(calListTool.name, { maxResults: 20 });
+    const calListResult: any = await mcpCallTool(calListTool.name, { maxResults: 50 });
     console.error("[MCP] raw calendar list result:", JSON.stringify(calListResult).slice(0, 500));
-    const calendars = calListResult?.items ?? calListResult ?? [];
+    const calendars = (calListResult?.items ?? calListResult?.calendars ?? calListResult ?? []) as any[];
     const ids = Array.isArray(calendars)
-      ? calendars.map((c: any) => c?.id || c?.calendarId).filter((x: any) => typeof x === "string")
+      ? calendars.map((c) => c?.id || c?.calendarId).filter((x) => typeof x === "string")
       : [];
     if (ids.length) calendarIds = ids;
     console.error("[MCP] calendarIds:", calendarIds);
   }
 
-  // 2. Get events
+  // 2) List events for each calendar
   const now = new Date();
   const timeMin = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const timeMax = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
   let allEvents: RawEvent[] = [];
-  for (const calId of calendarIds) {
+  for (const calId of calendarIds.slice(0, 5)) {
     const args = {
       calendarId: calId,
       timeMin,
@@ -202,11 +208,18 @@ export async function fetchMeetingsViaMCP() {
       orderBy: "startTime",
       maxResults: 50,
     };
-    const result = await mcpCallTool(eventsTool.name, args);
+    const result: any = await mcpCallTool(eventsTool.name, args);
     console.error(`[MCP] raw events for ${calId}:`, JSON.stringify(result).slice(0, 500));
+
     const events: RawEvent[] =
-      result?.items ?? result?.events ?? result?.content?.events ?? result?.content ?? result ?? [];
-    allEvents = allEvents.concat(events || []);
+      (result?.items as RawEvent[]) ??
+      (result?.events as RawEvent[]) ??
+      (result?.content?.events as RawEvent[]) ??
+      (result?.content as RawEvent[]) ??
+      (Array.isArray(result) ? (result as RawEvent[]) : []) ??
+      [];
+
+    if (Array.isArray(events)) allEvents = allEvents.concat(events);
   }
 
   return splitUpcomingPast(allEvents);
