@@ -163,6 +163,10 @@ export async function fetchMeetingsViaMCP() {
   // 2) Real Composio MCP flow (all steps safe)
   await mcpInitialize();
   const tools = await mcpListTools();
+
+  console.error("Available MCP tools:", tools.map(t => t.name));
+
+  
   const tool = pickListEventsTool(tools);
   if (!tool) {
     console.error("MCP: no 'List Events' tool found");
