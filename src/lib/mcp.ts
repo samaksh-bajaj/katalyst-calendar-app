@@ -164,7 +164,8 @@ export async function fetchMeetingsViaMCP() {
   await mcpInitialize();
   const tools = await mcpListTools();
 
-  console.error("Available MCP tools:", tools.map(t => t.name));
+  console.error("Available MCP tools:", (tools as any[]).map((t: any) => t?.name));
+
 
   
   const tool = pickListEventsTool(tools);
