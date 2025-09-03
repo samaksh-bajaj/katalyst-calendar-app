@@ -32,11 +32,28 @@ async function mcp(method: string, params: any) {
       body: JSON.stringify({ jsonrpc: "2.0", id: "1", method, params }),
       cache: "no-store",
     });
-    const text = await res.text(); // read once
-    if (!res.ok) {
-      console.error("MCP HTTP error", res.status, text);
-      return { ok: false, result: null };
+
+    const text = await res.text(); // read raw body
+
+    // If this is SSE, extract "data:" lines
+    if (text.startsWith("event:")) {
+      const dataLine = text
+        .split("\n")
+        .find((line) => line.startsWith("data:"));
+      if (!dataLine) {
+        console.error("MCP SSE but no data line", text.slice(0, 200));
+        return { ok: false, result: null };
+      }
+      try {
+        const json = JSON.parse(dataLine.replace(/^data:\s*/, ""));
+        return { ok: true, result: json.result };
+      } catch (e) {
+        console.error("Failed to parse MCP SSE JSON:", e, dataLine);
+        return { ok: false, result: null };
+      }
     }
+
+    // Otherwise assume plain JSON
     const json = JSON.parse(text || "{}");
     if (json?.error) {
       console.error("MCP JSON-RPC error", json.error);
@@ -48,6 +65,7 @@ async function mcp(method: string, params: any) {
     return { ok: false, result: null };
   }
 }
+
 
 async function mcpInitialize() {
   return mcp("initialize", {
