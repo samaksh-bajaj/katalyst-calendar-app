@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { fetchMeetingsViaMCP } from "@/lib/mcp";
-import { maybeSummarizePast } from "@/lib/summarize";
+// import { maybeSummarizePast } from "@/lib/summarize";
 
 export const runtime = "nodejs";
 
