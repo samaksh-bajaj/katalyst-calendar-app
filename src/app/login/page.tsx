@@ -8,7 +8,7 @@ export default function LoginPage() {
         <h1 className="text-2xl font-semibold">Sign in</h1>
         <button
           className="w-full rounded-2xl border p-2 hover:shadow"
-          onClick={() => signIn("google")}
+          onClick={() => signIn("google", { callbackUrl: "/" })}
         >
           Continue with Google
         </button>
