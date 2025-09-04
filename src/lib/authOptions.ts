@@ -17,6 +17,11 @@ export const authOptions: NextAuthOptions = {
       },
     }),
   ],
+  pages: {
+    signIn: "/login",   // custom login page
+    signOut: "/login",
+    error: "/login",    // redirect errors back to login
+  },
   callbacks: {
     async jwt({ token, account, profile }) {
       // Initial Google sign-in
