@@ -64,36 +64,39 @@ function unpackResult(result: any) {
  * Returns a URL to open in a new tab.
  */
 export async function initiateComposioGoogleCalendar(): Promise<string | null> {
-  // Tool name and args are commonly supported by Composio
   const raw = await mcpCall('tools/call', {
     name: 'COMPOSIO_INITIATE_CONNECTION',
     arguments: {
       provider: 'googlecalendar',
-      // read-only scope is enough for listing events
       scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-      // hint to return a URL we can open
       return_url: true,
     },
   });
 
+  console.error("[Connect] raw initiate result:", JSON.stringify(raw).slice(0, 500));
+
   const payload = unpackResult(raw);
-  // Typical shapes: { url: "..." } OR { data: { url: "..." } }
+  console.error("[Connect] unpacked payload:", JSON.stringify(payload).slice(0, 500));
+
   if (payload?.url && typeof payload.url === 'string') return payload.url;
   if (payload?.data?.url && typeof payload.data.url === 'string') return payload.data.url;
 
-  // Some servers return { content: [{ text: "{\"url\":\"...\"}" }]}
   if (raw?.content && Array.isArray(raw.content)) {
     const txt = raw.content.find((c: any) => typeof c?.text === 'string')?.text;
     if (txt) {
       try {
         const parsed = JSON.parse(txt);
+        console.error("[Connect] parsed text payload:", parsed);
         if (typeof parsed?.url === 'string') return parsed.url;
         if (typeof parsed?.data?.url === 'string') return parsed.data.url;
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.error("[Connect] failed to parse text:", e);
+      }
     }
   }
   return null;
 }
+
 
 /**
  * Checks if Google Calendar is connected in Composio (for the current user/context).
