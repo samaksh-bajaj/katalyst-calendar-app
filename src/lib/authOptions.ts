@@ -22,7 +22,9 @@ export const authOptions: NextAuthOptions = {
         token.email = (profile as any)?.email;
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token; // may be undefined after the first grant
-        token.expiresAt = Date.now() + (account.expires_in ? account.expires_in * 1000 : 3600_000);
+        const expiresIn = Number(account?.expires_in) || 3600; // fallback 1 hour
+        (token as any).expiresAt = Date.now() + expiresIn * 1000;
+
       }
       // Refresh access token if expired and we have a refresh token
       if (token.expiresAt && Date.now() > token.expiresAt && token.refreshToken) {
