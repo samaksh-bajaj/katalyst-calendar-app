@@ -19,13 +19,14 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, account, profile }) {
       // Initial sign-in
       if (account?.provider === "google") {
-        token.email = (profile as any)?.email;
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token; // may be undefined after the first grant
-        const expiresIn = Number(account?.expires_in) || 3600; // fallback 1 hour
-        (token as any).expiresAt = Date.now() + expiresIn * 1000;
+        (token as any).email = (profile as any)?.email;
+        (token as any).accessToken = account.access_token;
+        (token as any).refreshToken = account.refresh_token; // may be undefined after first grant
 
+        const expiresIn = Number(account?.expires_in) || 3600; // default 1h
+        (token as any).expiresAt = Date.now() + expiresIn * 1000;
       }
+
       // Refresh access token if expired and we have a refresh token
       if (token.expiresAt && Date.now() > token.expiresAt && token.refreshToken) {
         try {
