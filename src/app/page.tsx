@@ -1,3 +1,4 @@
+import ConnectCalendar from "@/components/ConnectCalendar";
 import Section from "@/components/Section";
 import MeetingCard from "@/components/MeetingCard";
 import { fetchMeetingsViaMCP } from "@/lib/mcp";
@@ -16,7 +17,10 @@ export default async function Home() {
     <main className="max-w-5xl mx-auto p-6 space-y-8">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Katalyst Calendar</h1>
-        <a className="text-sm underline" href="/login">Switch user</a>
+        <div className="flex items-center gap-4">
+          <ConnectCalendar />
+          <a className="text-sm underline" href="/login">Switch user</a>
+        </div>
       </header>
 
       <div className="grid md:grid-cols-2 gap-8">
