@@ -1,5 +1,18 @@
 'use server';
 
+export async function listMcpTools() {
+  const res = await fetch(process.env.NEXT_PUBLIC_MCP_URL!, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list", params: {} }),
+    cache: "no-store",
+  });
+
+  const text = await res.text();
+  console.error("[Tools/list raw]:", text.slice(0, 500));
+  return text;
+}
+
 // Uses the public MCP URL so this works both locally and on Vercel
 const MCP_URL = process.env.NEXT_PUBLIC_MCP_URL!;
 const HEADERS = {
