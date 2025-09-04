@@ -8,54 +8,65 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: "openid email profile https://www.googleapis.com/auth/calendar.readonly",
+          scope:
+            "openid email profile https://www.googleapis.com/auth/calendar.readonly",
+          // ensure refresh tokens so users stay signed in
           access_type: "offline",
-          prompt: "consent"
-        }
-      }
-    })
+          prompt: "consent",
+        },
+      },
+    }),
   ],
   callbacks: {
     async jwt({ token, account, profile }) {
-      // Initial sign-in
+      // Initial Google sign-in
       if (account?.provider === "google") {
         (token as any).email = (profile as any)?.email;
         (token as any).accessToken = account.access_token;
         (token as any).refreshToken = account.refresh_token; // may be undefined after first grant
 
-        const expiresIn = Number(account?.expires_in) || 3600; // default 1h
-        (token as any).expiresAt = Date.now() + expiresIn * 1000;
+        const expiresIn = Number(account?.expires_in) || 3600; // seconds
+        (token as any).expiresAt = Date.now() + expiresIn * 1000; // ms
       }
 
       // Refresh access token if expired and we have a refresh token
-      if (token.expiresAt && Date.now() > token.expiresAt && token.refreshToken) {
+      const expiresAt = Number((token as any).expiresAt || 0);
+      const refreshToken = (token as any).refreshToken as string | undefined;
+
+      if (expiresAt && Date.now() > expiresAt && refreshToken) {
         try {
           const params = new URLSearchParams({
             client_id: process.env.GOOGLE_CLIENT_ID!,
             client_secret: process.env.GOOGLE_CLIENT_SECRET!,
             grant_type: "refresh_token",
-            refresh_token: token.refreshToken as string
+            refresh_token: refreshToken,
           });
+
           const r = await fetch("https://oauth2.googleapis.com/token", {
             method: "POST",
             headers: { "content-type": "application/x-www-form-urlencoded" },
-            body: params
+            body: params,
           });
-          const data = await r.json();
-          if (data.access_token) {
-            token.accessToken = data.access_token;
-            token.expiresAt = Date.now() + (data.expires_in ? data.expires_in * 1000 : 3600_000);
+
+          const data: any = await r.json();
+
+          if (data?.access_token) {
+            (token as any).accessToken = data.access_token;
+            const newExp = Number(data?.expires_in) || 3600;
+            (token as any).expiresAt = Date.now() + newExp * 1000;
           }
         } catch {
-          // silently ignore; next request might re-prompt
+          // ignore; next request can re-prompt if needed
         }
       }
+
       return token;
     },
+
     async session({ session, token }) {
       (session as any).email = (token as any).email;
       (session as any).accessToken = (token as any).accessToken;
       return session;
-    }
-  }
+    },
+  },
 };
