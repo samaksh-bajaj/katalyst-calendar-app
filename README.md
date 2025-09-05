@@ -1,104 +1,106 @@
 # Katalyst Calendar App
 
-A demo full-stack take-home project: a calendar dashboard that integrates with **Google Calendar via Composio MCP** and generates **AI meeting summaries** with OpenAI.
+A Next.js web app that connects to a user's **Google Calendar** via **OAuth** and displays their meetings:
+- **Upcoming 5** events
+- **Past 5** events, with **AI-generated summaries**
 
 ---
 
-## 🚀 Features
-- **Mock login** → simple email-based login (cookies)  
-- **Google Calendar integration** → fetches real events via Composio MCP server  
-- **Dashboard** → shows the next 5 upcoming meetings and last 5 past meetings  
-- **AI summaries** → OpenAI generates short summaries for past events  
-- **Deployable** → Works locally (`npm run dev`) and on Vercel  
+## 🚀 Tech Stack
+- **Next.js 14 (App Router)**
+- **NextAuth.js** for Google OAuth login
+- **Google Calendar API** (read-only)
+- **OpenAI API** for meeting summaries
+- **Tailwind CSS** for UI
+
+---
+
+## ✨ Features
+- Secure login with **Google OAuth** (per-user, not hardcoded to one account).
+- Reads directly from each user’s **own calendar**.
+- Displays meeting cards with title, time, attendees, and description.
+- Generates short **AI summaries** for the last 5 meetings.
+- Clean, responsive card-based UI.
+
+---
+
+## 🛠 Setup Instructions
+
+### 1. Clone repo
+```bash
+git clone https://github.com/samaksh-bajaj/katalyst-calendar-app.git
+cd katalyst-calendar-app
+```
+
+### 2. Install dependencies
+```bash
+npm install
+```
+
+### 3. Environment variables
+Create a `.env.local` file in the root:
+
+```env
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=some-random-string
+OPENAI_API_KEY=your_openai_api_key
+```
+
+> For production (Vercel), set the same variables in **Vercel → Project Settings → Environment Variables**.
+
+### 4. Google Cloud setup
+1. Go to [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable the **Google Calendar API**.
+3. Configure an **OAuth consent screen** (Testing mode is fine).
+4. Create **OAuth client credentials** of type **Web Application** with these redirect URIs:
+   - `http://localhost:3000/api/auth/callback/google`
+   - `https://YOUR-VERCEL-DEPLOYMENT.vercel.app/api/auth/callback/google`
+
+5. Copy the **Client ID** and **Client Secret** into your `.env.local`.
+
+### 5. Run locally
+```bash
+npm run dev
+```
+Visit: [http://localhost:3000](http://localhost:3000)
+
+### 6. Deploy
+- Push to GitHub → Vercel auto-deploys.
+- Make sure env vars are set in Vercel.
 
 ---
 
 ## 📂 Project Structure
+
 ```
 src/
  ├─ app/
- │   ├─ page.tsx          # Dashboard (fetches meetings via MCP)
- │   └─ login/page.tsx    # Mock login
- ├─ components/           # UI components (Section, MeetingCard, etc.)
+ │   ├─ api/
+ │   │   └─ auth/[...nextauth]/route.ts   # NextAuth API route
+ │   ├─ login/page.tsx                    # Login page
+ │   ├─ page.tsx                          # Homepage (fetch + UI)
+ │
+ ├─ components/
+ │   └─ MeetingCard.tsx                   # Card UI for meetings
+ │
  ├─ lib/
- │   ├─ mcp.ts            # Composio MCP client (Google Calendar events)
- │   ├─ summarize.ts      # AI summarization logic
- │   ├─ auth.ts           # Cookie-based user auth
- │   ├─ time.ts           # Helpers for duration
- │   └─ types.ts          # Shared types
+ │   ├─ authOptions.ts                    # NextAuth config
+ │   ├─ auth.ts                           # getUser() helper
+ │   ├─ googleCalendar.ts                 # Google Calendar API helper
+ │   ├─ summarize.ts                      # OpenAI summarizer
+ │   └─ time.ts                           # Duration helpers
 ```
 
 ---
 
-## ⚙️ Setup
-
-### 1. Clone & install
-```bash
-git clone https://github.com/samaksh-bajaj/katalyst-calendar-app.git
-cd katalyst-calendar-app
-npm install
-```
-
-### 2. Environment variables
-Create a `.env.local` file in the project root:
-
-```env
-# OpenAI API Key (for summaries)
-OPENAI_API_KEY=sk-...
-
-# Composio MCP server URL (from your dashboard)
-NEXT_PUBLIC_MCP_URL=https://apollo-xxxx-composio.vercel.app/v3/mcp/your-server-id/mcp?include_composio_helper_actions=true
-```
-
-### 3. Run locally
-```bash
-npm run dev
-```
-Then open [http://localhost:3000](http://localhost:3000).
+## 🔒 Notes
+- App is currently in **Testing mode** on Google OAuth — only **approved test users** (added in the Google Cloud console) can log in.
+- If you want it publicly accessible, you’d need to publish and verify the OAuth app with Google.
 
 ---
 
-## ☁️ Deployment (Vercel)
-1. Push this repo to GitHub.  
-2. Import the repo into [Vercel](https://vercel.com).  
-3. In Vercel project settings → Environment Variables, add:  
-   - `OPENAI_API_KEY`  
-   - `NEXT_PUBLIC_MCP_URL`  
-4. Deploy.  
-
----
-
-## 🔑 Composio + Google Calendar Setup
-1. Go to [Composio](https://composio.app) → **Integrations**.  
-2. Connect **Google Calendar** and grant “view events” scope.  
-3. Get your MCP server URL (it looks like:  
-   ```
-   https://apollo-xxx-composio.vercel.app/v3/mcp/.../mcp?include_composio_helper_actions=true
-   ```
-   )  
-4. Add this to `.env.local` as `NEXT_PUBLIC_MCP_URL`.  
-
----
-
-## 🧪 Testing
-1. Log in at `/login` with any email.  
-2. Create a test event in Google Calendar (e.g., **“AI Demo Meeting”**).  
-3. Refresh the dashboard:  
-   - The event should appear under **Upcoming**.  
-   - After it passes, it will appear under **Past** with an AI-generated summary.  
-
----
-
-## 🛠 Notes
-- Default time window = events from **7 days ago → +30 days**.  
-- If no events show, check **Vercel Runtime Logs** for `[MCP] raw events payload…`.  
-- ESLint checks are disabled during build (`next.config.js`) for simplicity.  
-
----
-
-## ✅ Requirements Covered
-- Mock login flow ✔  
-- Calendar dashboard ✔  
-- AI summaries with OpenAI ✔  
-- External integration via MCP ✔  
-- Deployable on Vercel ✔  
+## 🙋‍♂️ Author Notes
+- My initial commit history looks large because I had to recreate the repository after accidentally pushing `node_modules` (over 100MB).  
+- If you’d like me to include anything additional (tests, API docs, or UI polish), please let me know!
